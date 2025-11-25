@@ -252,6 +252,34 @@ async def ffmpeg_url(url, timeout=speed_test_timeout):
         return res
 
 
+def _run_ffprobe_sync(args, timeout):
+    """
+    同步执行 ffprobe 的辅助函数，利用 subprocess.run 的原生超时清理机制
+    """
+    try:
+        # 针对 Windows 防止弹出黑窗口 (如果是 Linux 这一步会自动被忽略)
+        startupinfo = None
+        if os.name == 'nt':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+        # 核心：使用 subprocess.run
+        # 它会在超时发生时自动 kill 子进程并回收资源
+        result = subprocess.run(
+            args,
+            capture_output=True,  # 捕获输出
+            timeout=timeout,      # 原生超时控制
+            startupinfo=startupinfo,
+            check=False           # 报错不抛异常，由下面处理
+        )
+        return result.stdout
+    except subprocess.TimeoutExpired:
+        # subprocess.run 内部已经处理了 kill 和 wait，这里只需返回 None
+        return None
+    except Exception:
+        return None
+
+
 async def get_resolution_ffprobe(url: str, headers: dict = None, timeout: int = speed_test_timeout) -> str | None:
     """
     Get the resolution of the url by ffprobe
@@ -268,18 +296,41 @@ async def get_resolution_ffprobe(url: str, headers: dict = None, timeout: int = 
             "-of", 'json',
             url
         ]
-        proc = await asyncio.create_subprocess_exec(*probe_args, stdout=asyncio.subprocess.PIPE,
-                                                    stderr=asyncio.subprocess.PIPE)
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
-        video_stream = json.loads(out.decode('utf-8'))["streams"][0]
-        resolution = f"{video_stream['width']}x{video_stream['height']}"
-    except:
-        if proc:
-            proc.kill()
-    finally:
-        if proc:
-            await proc.wait()
-        return resolution
+        #proc = await asyncio.create_subprocess_exec(*probe_args, stdout=asyncio.subprocess.PIPE,
+                                                    #stderr=asyncio.subprocess.PIPE)
+        #out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+        #video_stream = json.loads(out.decode('utf-8'))["streams"][0]
+        #resolution = f"{video_stream['width']}x{video_stream['height']}"
+    #except:
+        #if proc:
+            #proc.kill()
+    #finally:
+        #if proc:
+            ##await proc.wait()
+            #try:
+                #if proc.stdout: proc.stdout.close()
+                #if proc.stderr: proc.stderr.close()
+            #except:
+                #pass
+            #try:
+                #proc.kill()
+            #except ProcessLookupError:
+                #pass
+            #asyncio.create_task(proc.wait())
+        loop = asyncio.get_running_loop()
+        out = await loop.run_in_executor(None, _run_ffprobe_sync, probe_args, timeout)
+        
+        if out:
+            try:
+                video_stream = json.loads(out.decode('utf-8'))["streams"][0]
+                resolution = f"{video_stream['width']}x{video_stream['height']}"
+            except (KeyError, IndexError, json.JSONDecodeError):
+                pass
+                
+    except Exception:
+        pass
+            
+    return resolution
 
 
 def get_video_info(video_info):
