@@ -589,17 +589,20 @@ def append_data_to_info_data(
                     if ipv_type_data and host in ipv_type_data:
                         ipv_type = ipv_type_data[host]
                     else:
-                        ipv_type = ip_checker.get_ipv_type(url)
+                        #ipv_type = ip_checker.get_ipv_type(url)
+                        # 只要带中括号就是 IPv6，否则全当 IPv4。
+                        ipv_type = "ipv6" if "[" in url else "ipv4"
                         if ipv_type_data is not None:
                             ipv_type_data[host] = ipv_type
 
                 if not check_ipv_type_match(ipv_type):
                     continue
 
-                if not location or not isp:
-                    ip = ip_checker.get_ip(url)
-                    if ip:
-                        location, isp = ip_checker.find_map(ip)
+                # 彻底移除地理位置/运营商查询
+                #if not location or not isp:
+                #    ip = ip_checker.get_ip(url)
+                #    if ip:
+                #        location, isp = ip_checker.find_map(ip)
 
                 if location and location_list and not any(item in location for item in location_list):
                     continue
