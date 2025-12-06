@@ -298,6 +298,9 @@ async def get_resolution_ffprobe(url: str, headers: dict = None, timeout: int = 
     """
     Get the resolution of the url by ffprobe
     """
+    if not check_ffprobe_installed_status():
+        return None
+    
     resolution = None
     proc = None
     try:
