@@ -254,29 +254,33 @@ async def ffmpeg_url(url, timeout=speed_test_timeout):
 
 def _run_ffprobe_sync(args, timeout):
     """
-    同步执行 ffprobe 的辅助函数，利用 subprocess.run 的原生超时清理机制
+    同步执行 ffprobe 的辅助函数
     """
     try:
-        # 针对 Windows 防止弹出黑窗口 (如果是 Linux 这一步会自动被忽略)
         startupinfo = None
         if os.name == 'nt':
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-        # 核心：使用 subprocess.run
-        # 它会在超时发生时自动 kill 子进程并回收资源
         result = subprocess.run(
             args,
-            capture_output=True,  # 捕获输出
-            timeout=timeout,      # 原生超时控制
+            capture_output=True,
+            timeout=timeout,
             startupinfo=startupinfo,
-            check=False           # 报错不抛异常，由下面处理
+            check=False
         )
         return result.stdout
     except subprocess.TimeoutExpired:
-        # subprocess.run 内部已经处理了 kill 和 wait，这里只需返回 None
+        # 打印超时警告，方便排查
+        print(f"⚠️ FFprobe Timeout (>{timeout}s): {args[-1]}")
         return None
-    except Exception:
+    except FileNotFoundError:
+        # 打印找不到文件警告
+        print("❌ Error: ffprobe not found! Please check PATH or install FFmpeg.")
+        return None
+    except Exception as e:
+        # 打印其他未知错误
+        print(f"❌ FFprobe Error: {e}")
         return None
 
 
