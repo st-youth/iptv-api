@@ -252,11 +252,30 @@ async def ffmpeg_url(url, timeout=speed_test_timeout):
         return res
 
 
+def check_ffprobe_installed_status():
+    """
+    Check ffprobe is installed
+    """
+    status = False
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        status = result.returncode == 0
+    except FileNotFoundError:
+        status = False
+    except Exception as e:
+        print(e)
+    finally:
+        return status
+
+
 def _run_ffprobe_sync(args, timeout):
     """
     同步执行 ffprobe 的辅助函数
     """
     try:
+        # 针对 Windows 防止弹出黑窗口
         startupinfo = None
         if os.name == 'nt':
             startupinfo = subprocess.STARTUPINFO()
@@ -270,17 +289,8 @@ def _run_ffprobe_sync(args, timeout):
             check=False
         )
         return result.stdout
-    except subprocess.TimeoutExpired:
-        # 打印超时警告，方便排查
-        print(f"⚠️ FFprobe Timeout (>{timeout}s): {args[-1]}")
-        return None
-    except FileNotFoundError:
-        # 打印找不到文件警告
-        print("❌ Error: ffprobe not found! Please check PATH or install FFmpeg.")
-        return None
-    except Exception as e:
-        # 打印其他未知错误
-        print(f"❌ FFprobe Error: {e}")
+    except Exception:
+        # 发生超时或其他任何错误，直接静默失败，不打印日志
         return None
 
 
@@ -326,7 +336,7 @@ async def get_resolution_ffprobe(url: str, headers: dict = None, timeout: int = 
         
         if out:
             try:
-                video_stream = json.loads(out.decode('utf-8'))["streams"][0]
+                video_stream = json.loads(out.decode('utf-8', errors='ignore'))["streams"][0]
                 resolution = f"{video_stream['width']}x{video_stream['height']}"
             except (KeyError, IndexError, json.JSONDecodeError):
                 pass
