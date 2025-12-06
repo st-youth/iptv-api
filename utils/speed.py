@@ -271,126 +271,67 @@ def check_ffprobe_installed_status():
         return status
 
 
-def _run_ffprobe_sync(args, timeout):
-    """
-    同步执行 ffprobe 的辅助函数
-    """
-    start_t = time()
-    try:
-        # 针对 Windows 防止弹出黑窗口
-        startupinfo = None
-        if os.name == 'nt':
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            
-        # 🟢 1. 打印正在执行的命令，检查参数是否正确
-        #print(f"🔍 [诊断] 正在执行: {' '.join(args)}")
-
-        result = subprocess.run(
-            args,
-            capture_output=True,
-            timeout=timeout,
-            startupinfo=startupinfo,
-            check=False
-        )
-        #return result.stdout
-        
-        cost = time() - start_t
-        
-        # 🟢 2. 如果返回码不是 0，打印标准错误输出 (stderr)
-        if result.returncode != 0:
-            err_msg = result.stderr.decode('utf-8', errors='ignore').strip()
-            print(f"❌ [诊断] FFprobe 失败 (耗时{cost:.1f}s, Code {result.returncode})")
-            print(f"   错误日志 >> {err_msg[:300]}") # 只看前300字符
-            return None
-
-        # 🟢 3. 如果成功但没有输出
-        if not result.stdout:
-            print(f"⚠️ [诊断] FFprobe 成功退出但无输出 (耗时{cost:.1f}s)")
-            return None
-
-        return result.stdout
-
-    except subprocess.TimeoutExpired:
-        print(f"⏰ [诊断] FFprobe 超时被杀 (设置时长: {timeout}s)")
-        return None
-    except Exception as e:
-        print(f"💥 [诊断] Python 执行异常: {e}")
-        return None
-        
-    #except Exception:
-    #    return None
-
-
 async def get_resolution_ffprobe(url: str, headers: dict = None, timeout: int = speed_test_timeout) -> str | None:
     """
     Get the resolution of the url by ffprobe
     """
     if not check_ffprobe_installed_status():
-        print("🚫 [诊断] 未检测到 ffprobe 可执行文件")
         return None
     
     resolution = None
     proc = None
     try:
-        probe_args = [
-            'ffprobe',
-            '-v', 'error',
-            '-headers', ''.join(f'{k}: {v}\r\n' for k, v in headers.items()) if headers else '',
-            '-select_streams', 'v:0',
-            '-show_entries', 'stream=width,height',
-            "-of", 'json',
+        probe_args = ['ffprobe', '-v', 'error']
+        
+        if headers:
+            headers_str = ''.join(f'{k}: {v}\r\n' for k, v in headers.items())
+            probe_args.extend(['-headers', headers_str])
+
+        probe_args.extend([
+            '-show_entries', 'stream=width,height,codec_type', 
+            '-of', 'json',
             '-analyzeduration', '5000000',
             '-probesize', '5000000',
             url
-        ]
-        #proc = await asyncio.create_subprocess_exec(*probe_args, stdout=asyncio.subprocess.PIPE,
-                                                    #stderr=asyncio.subprocess.PIPE)
-        #out, _ = await asyncio.wait_for(proc.communicate(), timeout)
-        #video_stream = json.loads(out.decode('utf-8'))["streams"][0]
-        #resolution = f"{video_stream['width']}x{video_stream['height']}"
-    #except:
-        #if proc:
-            #proc.kill()
-    #finally:
-        #if proc:
-            ##await proc.wait()
-            #try:
-                #if proc.stdout: proc.stdout.close()
-                #if proc.stderr: proc.stderr.close()
-            #except:
-                #pass
-            #try:
-                #proc.kill()
-            #except ProcessLookupError:
-                #pass
-            #asyncio.create_task(proc.wait())
-        loop = asyncio.get_running_loop()
-        out = await loop.run_in_executor(None, _run_ffprobe_sync, probe_args, timeout)
+        ])
         
-        #if out:
-        #    try:
-        #        video_stream = json.loads(out.decode('utf-8', errors='ignore'))["streams"][0]
-        #        resolution = f"{video_stream['width']}x{video_stream['height']}"
-        #    except (KeyError, IndexError, json.JSONDecodeError):
-        #        pass
+        startupinfo = None
+        if os.name == 'nt':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            
+        proc = await asyncio.create_subprocess_exec(
+            *probe_args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
+            startupinfo=startupinfo
+        )
+
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         
-        if out:
+        if stdout:
             try:
-                video_stream = json.loads(out.decode('utf-8'))["streams"][0]
-                resolution = f"{video_stream['width']}x{video_stream['height']}"
-                    
-                    # 调试：如果没找到分辨率，打印一下到底返回了什么流
-                if not resolution:
-                    print(f"⚠️ [诊断] JSON 解析成功，但未找到视频流宽高。流信息: {video_stream}")
-                        
-            except Exception as e:
-                print(f"❌ JSON解析异常: {e}")
+                data = json.loads(stdout.decode('utf-8', errors='ignore'))
+                if "streams" in data:
+                    for stream in data["streams"]:
+                        if stream.get("codec_type") == "video":
+                            if "width" in stream and "height" in stream:
+                                resolution = f"{stream['width']}x{stream['height']}"
+                                break 
+            except Exception:
                 pass
-                
-    except Exception:
-        print(f"💥 [诊断] 外层异常: {e}")
+
+    except (asyncio.TimeoutExpired, Exception):
         pass
+            
+    finally:
+        if proc and proc.returncode is None:
+            try:
+                proc.kill()
+                await proc.wait() 
+            except Exception:
+                pass
             
     return resolution
 
