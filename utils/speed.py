@@ -1,7 +1,6 @@
 import asyncio
 import http.cookies
 import json
-import os
 import re
 import subprocess
 from time import time
@@ -253,87 +252,34 @@ async def ffmpeg_url(url, timeout=speed_test_timeout):
         return res
 
 
-def check_ffprobe_installed_status():
-    """
-    Check ffprobe is installed
-    """
-    status = False
-    try:
-        result = subprocess.run(
-            ["ffprobe", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        status = result.returncode == 0
-    except FileNotFoundError:
-        status = False
-    except Exception as e:
-        print(e)
-    finally:
-        return status
-
-
 async def get_resolution_ffprobe(url: str, headers: dict = None, timeout: int = speed_test_timeout) -> str | None:
     """
     Get the resolution of the url by ffprobe
     """
-    if not check_ffprobe_installed_status():
-        return None
-    
     resolution = None
     proc = None
     try:
-        probe_args = ['ffprobe', '-v', 'error']
-        
-        if headers:
-            headers_str = ''.join(f'{k}: {v}\r\n' for k, v in headers.items())
-            probe_args.extend(['-headers', headers_str])
-
-        probe_args.extend([
-            '-show_entries', 'stream=width,height,codec_type', 
-            '-of', 'json',
-            '-analyzeduration', '5000000',
-            '-probesize', '5000000',
+        probe_args = [
+            'ffprobe',
+            '-v', 'error',
+            '-headers', ''.join(f'{k}: {v}\r\n' for k, v in headers.items()) if headers else '',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=width,height',
+            "-of", 'json',
             url
-        ])
-        
-        startupinfo = None
-        if os.name == 'nt':
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            
-        proc = await asyncio.create_subprocess_exec(
-            *probe_args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            stdin=asyncio.subprocess.DEVNULL,
-            startupinfo=startupinfo
-        )
-
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        
-        if stdout:
-            try:
-                data = json.loads(stdout.decode('utf-8', errors='ignore'))
-                if "streams" in data:
-                    for stream in data["streams"]:
-                        if stream.get("codec_type") == "video":
-                            if "width" in stream and "height" in stream:
-                                resolution = f"{stream['width']}x{stream['height']}"
-                                break 
-            except Exception:
-                pass
-
-    except (asyncio.TimeoutExpired, Exception):
-        pass
-            
+        ]
+        proc = await asyncio.create_subprocess_exec(*probe_args, stdout=asyncio.subprocess.PIPE,
+                                                    stderr=asyncio.subprocess.PIPE)
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+        video_stream = json.loads(out.decode('utf-8'))["streams"][0]
+        resolution = f"{video_stream['width']}x{video_stream['height']}"
+    except:
+        if proc:
+            proc.kill()
     finally:
-        if proc and proc.returncode is None:
-            try:
-                proc.kill()
-                await proc.wait() 
-            except Exception:
-                pass
-            
-    return resolution
+        if proc:
+            await proc.wait()
+        return resolution
 
 
 def get_video_info(video_info):
