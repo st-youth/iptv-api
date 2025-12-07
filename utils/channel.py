@@ -590,6 +590,7 @@ def append_data_to_info_data(
                         ipv_type = ipv_type_data[host]
                     else:
                         ipv_type = ip_checker.get_ipv_type(url)
+                        #ipv_type = "ipv6" if "[" in url else "ipv4"
                         if ipv_type_data is not None:
                             ipv_type_data[host] = ipv_type
 
